@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -71,12 +74,16 @@ func main() {
 		log.Fatal("server address required: use -config or -server")
 	}
 	if cfg.Client.ID == "" {
-		// Default client ID from hostname
 		host, _ := os.Hostname()
-		cfg.Client.ID = host
-		if cfg.Client.ID == "" {
-			cfg.Client.ID = "client"
+		if host == "" {
+			host = "client"
 		}
+		if len(host) > 20 {
+			host = host[:20]
+		}
+		b := make([]byte, 3)
+		rand.Read(b)
+		cfg.Client.ID = fmt.Sprintf("%s-%s", strings.TrimSuffix(host, ".local"), hex.EncodeToString(b))
 	}
 
 	heartbeat, _ := time.ParseDuration(cfg.Client.HeartbeatInterval)

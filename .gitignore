@@ -1,5 +1,28 @@
+# Binaries
 bin/
-web/node_modules/
+/relayc
+/relayd
+
+# Frontend build output
 web/dist/
 cmd/relayd/web/dist/
-*.tsbuildinfo
+
+# Dependencies
+web/node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (sensitive)
+config.yaml
+*.local.yaml
+
+# Docker
+docker-compose.override.yaml

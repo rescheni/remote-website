@@ -190,6 +190,12 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		LastSeen:  time.Now(),
 	}
 
+	if existing := s.Hub.Get(reg.ClientID); existing != nil {
+		log.Printf("WARNING: replacing client %s (was connected %v ago, last seen %v ago)",
+			reg.ClientID,
+			time.Since(existing.Connected).Round(time.Second),
+			time.Since(existing.LastSeen).Round(time.Second))
+	}
 	s.Hub.Remove(reg.ClientID)
 	s.Hub.Add(client)
 

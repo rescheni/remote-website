@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -43,9 +44,26 @@ func NewHub() *Hub {
 
 func (h *Hub) Add(c *ClientConn) {
 	h.mu.Lock()
+	for id, existing := range h.clients {
+		for _, er := range existing.Routes {
+			for _, nr := range c.Routes {
+				if er.Host == nr.Host && er.PathPrefix == nr.PathPrefix && routeType(er) == routeType(nr) {
+					log.Printf("route overlap: %s and %s both serve [%s] %s%s (load-balanced)",
+						id, c.ID, routeType(er), er.Host, er.PathPrefix)
+				}
+			}
+		}
+	}
 	h.clients[c.ID] = c
 	h.mu.Unlock()
 	log.Printf("client connected: %s (routes: %d)", c.ID, len(c.Routes))
+}
+
+func routeType(r proto.Route) string {
+	if r.Type == "" {
+		return "http"
+	}
+	return r.Type
 }
 
 func (h *Hub) Remove(id string) {
@@ -61,14 +79,19 @@ func (h *Hub) Get(id string) *ClientConn {
 	return h.clients[id]
 }
 
-// MatchRoute finds the best matching client+target for a host and path.
+type routeMatch struct {
+	client *ClientConn
+	target string
+}
+
+// MatchRoute finds all clients matching a host+path and picks one at random
+// for load balancing across clients with the same route.
 // Priority: exact host+path_prefix match > host-only match.
 func (h *Hub) MatchRoute(host, path string) (*ClientConn, string) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	var bestClient *ClientConn
-	var bestTarget string
+	var matches []routeMatch
 	bestLen := -1
 
 	for _, c := range h.clients {
@@ -80,33 +103,44 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string) {
 				if len(path) >= len(r.PathPrefix) && path[:len(r.PathPrefix)] == r.PathPrefix {
 					if len(r.PathPrefix) > bestLen {
 						bestLen = len(r.PathPrefix)
-						bestClient = c
-						bestTarget = r.Target
+						matches = []routeMatch{{c, r.Target}}
+					} else if len(r.PathPrefix) == bestLen {
+						matches = append(matches, routeMatch{c, r.Target})
 					}
 				}
 			} else {
 				if bestLen < 0 {
-					bestClient = c
-					bestTarget = r.Target
+					matches = append(matches, routeMatch{c, r.Target})
 				}
 			}
 		}
 	}
-	return bestClient, bestTarget
+	if len(matches) == 0 {
+		return nil, ""
+	}
+	m := matches[rand.Intn(len(matches))]
+	return m.client, m.target
 }
 
-// MatchTCPRoute finds a client+target for a TCP port.
+// MatchTCPRoute finds all clients matching a TCP port and picks one at random
+// for load balancing across clients exposing the same port.
 func (h *Hub) MatchTCPRoute(port int) (*ClientConn, string) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+
+	var matches []routeMatch
 	for _, c := range h.clients {
 		for _, r := range c.Routes {
 			if r.Type == "tcp" && r.RemotePort == port {
-				return c, r.Target
+				matches = append(matches, routeMatch{c, r.Target})
 			}
 		}
 	}
-	return nil, ""
+	if len(matches) == 0 {
+		return nil, ""
+	}
+	m := matches[rand.Intn(len(matches))]
+	return m.client, m.target
 }
 
 // UpdateRoutes sets routes for a client and returns the new routes.
@@ -128,6 +162,17 @@ func (h *Hub) AddRoute(clientID string, route proto.Route) bool {
 	c, ok := h.clients[clientID]
 	if !ok {
 		return false
+	}
+	for id, existing := range h.clients {
+		if id == clientID {
+			continue
+		}
+		for _, er := range existing.Routes {
+			if er.Host == route.Host && er.PathPrefix == route.PathPrefix && routeType(er) == routeType(route) {
+				log.Printf("route overlap: %s and %s both serve [%s] %s%s (load-balanced)",
+					id, clientID, routeType(er), er.Host, er.PathPrefix)
+			}
+		}
 	}
 	c.Routes = append(c.Routes, route)
 	return true
