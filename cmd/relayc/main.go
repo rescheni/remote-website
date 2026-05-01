@@ -20,9 +20,9 @@ type Config struct {
 		Secret string `yaml:"secret"`
 	} `yaml:"server"`
 	Client struct {
-		ID                 string   `yaml:"id"`
-		HeartbeatInterval  string   `yaml:"heartbeat_interval"`
-		ReconnectBackoff   []string `yaml:"reconnect_backoff"`
+		ID                string   `yaml:"id"`
+		HeartbeatInterval string   `yaml:"heartbeat_interval"`
+		ReconnectBackoff  []string `yaml:"reconnect_backoff"`
 	} `yaml:"client"`
 	Routes []struct {
 		Host       string `yaml:"host"`
@@ -32,17 +32,51 @@ type Config struct {
 }
 
 func main() {
-	configPath := flag.String("config", "client.yaml", "path to config file")
+	// CLI flags
+	configPath := flag.String("config", "", "path to config file (optional, use CLI flags instead)")
+	serverAddr := flag.String("server", "", "server address (e.g. your-server.com:8443)")
+	clientID := flag.String("id", "", "client ID (e.g. my-phone)")
+	secret := flag.String("secret", "", "shared secret for auth")
+	tls := flag.Bool("tls", false, "use TLS/WSS")
 	flag.Parse()
 
-	data, err := os.ReadFile(*configPath)
-	if err != nil {
-		log.Fatalf("read config: %v", err)
+	var cfg Config
+
+	// Load config file if specified
+	if *configPath != "" {
+		data, err := os.ReadFile(*configPath)
+		if err != nil {
+			log.Fatalf("read config: %v", err)
+		}
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			log.Fatalf("parse config: %v", err)
+		}
 	}
 
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		log.Fatalf("parse config: %v", err)
+	// CLI flags override config file values
+	if *serverAddr != "" {
+		cfg.Server.Addr = *serverAddr
+	}
+	if *clientID != "" {
+		cfg.Client.ID = *clientID
+	}
+	if *secret != "" {
+		cfg.Server.Secret = *secret
+	}
+	if isFlagSet("tls") {
+		cfg.Server.TLS = *tls
+	}
+
+	if cfg.Server.Addr == "" {
+		log.Fatal("server address required: use -config or -server")
+	}
+	if cfg.Client.ID == "" {
+		// Default client ID from hostname
+		host, _ := os.Hostname()
+		cfg.Client.ID = host
+		if cfg.Client.ID == "" {
+			cfg.Client.ID = "client"
+		}
 	}
 
 	heartbeat, _ := time.ParseDuration(cfg.Client.HeartbeatInterval)
@@ -71,8 +105,10 @@ func main() {
 	fmt.Printf("=== relayc starting ===\n")
 	fmt.Printf("Server: %s (tls=%v)\n", cfg.Server.Addr, cfg.Server.TLS)
 	fmt.Printf("Client ID: %s\n", cfg.Client.ID)
-	for _, r := range routes {
-		fmt.Printf("Route: %s%s → %s\n", r.Host, r.PathPrefix, r.Target)
+	if len(routes) > 0 {
+		fmt.Printf("Routes: %d (from config)\n", len(routes))
+	} else {
+		fmt.Printf("Routes: managed via Dashboard\n")
 	}
 
 	log.Fatal(client.Run(&client.Config{
@@ -84,4 +120,14 @@ func main() {
 		ReconnectBackoff: backoff,
 		Routes:           routes,
 	}))
+}
+
+func isFlagSet(name string) bool {
+	found := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }
