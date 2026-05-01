@@ -10,7 +10,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=frontend /src/cmd/relayd/web/dist ./cmd/relayd/web/dist
+COPY --from=frontend /cmd/relayd/web/dist ./cmd/relayd/web/dist
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /relayd ./cmd/relayd
 
 FROM alpine:3.22
