@@ -1,13 +1,14 @@
 package client
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -24,6 +25,24 @@ type Config struct {
 	Heartbeat        time.Duration
 	ReconnectBackoff []time.Duration
 	Routes           []proto.Route
+}
+
+// Currently connected WebSocket conn reference for TCP proxy writes
+var (
+	currentConn   *websocket.Conn
+	currentConnMu sync.RWMutex
+)
+
+func setCurrentConn(conn *websocket.Conn) {
+	currentConnMu.Lock()
+	currentConn = conn
+	currentConnMu.Unlock()
+}
+
+func getCurrentConn() *websocket.Conn {
+	currentConnMu.RLock()
+	defer currentConnMu.RUnlock()
+	return currentConn
 }
 
 func Run(cfg *Config) error {
@@ -60,10 +79,11 @@ func connect(cfg *Config) error {
 		return fmt.Errorf("dial: %w", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
+	setCurrentConn(conn)
+	defer setCurrentConn(nil)
 
 	log.Printf("connected to %s", url)
 
-	// Send register
 	reg := proto.Register{
 		Type:     proto.TypeRegister,
 		ClientID: cfg.ClientID,
@@ -73,28 +93,42 @@ func connect(cfg *Config) error {
 		return fmt.Errorf("register: %w", err)
 	}
 
-	// Start heartbeat
 	done := make(chan struct{})
 	defer close(done)
 	go heartbeat(ctx, conn, cfg.Heartbeat, done)
 
-	// Read loop
+	// Read loop: handles both text (JSON) and binary (TCP data)
 	for {
-		var raw json.RawMessage
-		if err := wsjson.Read(ctx, conn, &raw); err != nil {
+		typ, data, err := conn.Read(ctx)
+		if err != nil {
 			return fmt.Errorf("read: %w", err)
 		}
 
-		msgType, msg, err := proto.Decode(raw)
-		if err != nil {
-			continue
-		}
+		switch typ {
+		case websocket.MessageText:
+			msgType, msg, err := proto.Decode(data)
+			if err != nil {
+				continue
+			}
+			switch msgType {
+			case proto.TypeReq:
+				go handleRequest(ctx, conn, msg.(*proto.Request))
+			case proto.TypeTCPConnect:
+				go handleTCPConnect(msg.(*proto.TCPConnect))
+			case proto.TypeTCPClose:
+				stopTCPProxy(msg.(*proto.TCPClose).ID)
+			case proto.TypeRouteUpdate:
+				handleRouteUpdate(cfg, msg.(*proto.RouteUpdate))
+			case proto.TypePong:
+				// ignore
+			}
 
-		switch msgType {
-		case proto.TypeReq:
-			go handleRequest(ctx, conn, msg.(*proto.Request))
-		case proto.TypePong:
-			// ignore
+		case websocket.MessageBinary:
+			streamID, payload, err := proto.ReadTCPFrameFull(bytes.NewReader(data))
+			if err != nil {
+				continue
+			}
+			handleTCPDataFromServer(streamID, payload)
 		}
 	}
 }
@@ -115,7 +149,6 @@ func heartbeat(ctx context.Context, conn *websocket.Conn, interval time.Duration
 }
 
 func handleRequest(ctx context.Context, conn *websocket.Conn, req *proto.Request) {
-	// req.Target is the base URL like "http://localhost:3000"
 	targetURL := req.Target + req.Path
 	bodyReader := strings.NewReader(req.Body)
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, targetURL, bodyReader)
@@ -128,7 +161,6 @@ func handleRequest(ctx context.Context, conn *websocket.Conn, req *proto.Request
 			httpReq.Header.Set(k, v)
 		}
 	}
-
 	httpReq.RequestURI = ""
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
@@ -144,7 +176,6 @@ func handleRequest(ctx context.Context, conn *websocket.Conn, req *proto.Request
 			headers[k] = v[0]
 		}
 	}
-
 	resMsg := proto.Response{
 		Type:    proto.TypeRes,
 		ID:      req.ID,
@@ -153,6 +184,26 @@ func handleRequest(ctx context.Context, conn *websocket.Conn, req *proto.Request
 		Body:    string(bodyBytes),
 	}
 	wsjson.Write(ctx, conn, resMsg)
+}
+
+func handleTCPConnect(msg *proto.TCPConnect) {
+	wsConn := getCurrentConn()
+	if wsConn == nil {
+		return
+	}
+	go startTCPProxy(msg.ID, msg.Target, wsConn)
+}
+
+func handleRouteUpdate(cfg *Config, msg *proto.RouteUpdate) {
+	cfg.Routes = msg.Routes
+	log.Printf("routes updated: %d routes", len(msg.Routes))
+	for _, r := range msg.Routes {
+		if r.Type == "tcp" {
+			log.Printf("  TCP %s -> :%d", r.Target, r.RemotePort)
+		} else {
+			log.Printf("  HTTP %s%s -> %s", r.Host, r.PathPrefix, r.Target)
+		}
+	}
 }
 
 func sendError(ctx context.Context, conn *websocket.Conn, id, errStr string) {

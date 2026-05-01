@@ -13,9 +13,5 @@ client:
     - "10s"
     - "30s"
 
-routes:
-  - host: "app1.example.com"
-    target: "http://localhost:3000"
-  - host: "www.example.com"
-    path_prefix: "/service-b"
-    target: "http://localhost:8080"
+# Routes are optional - can also be managed via Dashboard
+routes: []

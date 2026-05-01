@@ -4,5 +4,10 @@ listen:
   tunnel: ":8443"
   dashboard: ":7500"
 
+tcp_udp:
+  tcp_proxy:
+    - 2222   # SSH proxy
+    - 5432   # Postgres proxy
+
 dashboard:
   enabled: true

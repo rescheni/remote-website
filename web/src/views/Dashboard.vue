@@ -1,23 +1,29 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { fetchClients, fetchRoutes, fetchStats } from '../api/index'
-import type { ClientInfo, RouteInfo, StatsInfo } from '../api/index'
+import { fetchClients, fetchStats } from '../api/index'
+import type { ClientInfo, StatsInfo } from '../api/index'
 import ClientList from '../components/ClientList.vue'
 import RouteTable from '../components/RouteTable.vue'
-import TrafficLog from '../components/TrafficLog.vue'
 
 const clients = ref<ClientInfo[]>([])
-const routes = ref<RouteInfo[]>([])
 const stats = ref<StatsInfo>({ total_requests: 0, total_bytes_in: 0, total_bytes_out: 0, online_clients: 0 })
+const selectedClient = ref<ClientInfo | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
 
 async function refresh() {
   try {
-    const [c, r, s] = await Promise.all([fetchClients(), fetchRoutes(), fetchStats()])
+    const [c, s] = await Promise.all([fetchClients(), fetchStats()])
     clients.value = c
-    routes.value = r
     stats.value = s
-  } catch { /* dashboard API may not be mounted yet */ }
+    if (selectedClient.value) {
+      const found = c.find(x => x.id === selectedClient.value!.id)
+      selectedClient.value = found || null
+    }
+  } catch { /* ignore */ }
+}
+
+function selectClient(c: ClientInfo) {
+  selectedClient.value = c
 }
 
 onMounted(() => { refresh(); timer = setInterval(refresh, 5000) })
@@ -29,27 +35,27 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
     <header class="header">
       <h1>Relay Tunnel</h1>
       <div class="stat-cards">
-        <div class="card"><span class="val">{{ stats.online_clients }}</span><span class="lbl">在线设备</span></div>
-        <div class="card"><span class="val">{{ stats.total_requests }}</span><span class="lbl">总请求数</span></div>
-        <div class="card"><span class="val">{{ formatBytes(stats.total_bytes_in) }}</span><span class="lbl">入站流量</span></div>
-        <div class="card"><span class="val">{{ formatBytes(stats.total_bytes_out) }}</span><span class="lbl">出站流量</span></div>
+        <div class="card"><span class="val">{{ stats.online_clients }}</span><span class="lbl">Online</span></div>
+        <div class="card"><span class="val">{{ stats.total_requests }}</span><span class="lbl">Requests</span></div>
+        <div class="card"><span class="val">{{ fmtBytes(stats.total_bytes_in) }}</span><span class="lbl">In</span></div>
+        <div class="card"><span class="val">{{ fmtBytes(stats.total_bytes_out) }}</span><span class="lbl">Out</span></div>
       </div>
     </header>
     <main class="main">
       <section class="panel">
-        <h2>在线设备</h2>
-        <ClientList :clients="clients" />
+        <h2>Devices</h2>
+        <ClientList :clients="clients" @select="selectClient" />
       </section>
       <section class="panel">
-        <h2>路由表</h2>
-        <RouteTable :routes="routes" />
+        <h2>Route Management</h2>
+        <RouteTable :routes="selectedClient?.routes || []" :selected-client="selectedClient" @refresh="refresh" />
       </section>
     </main>
   </div>
 </template>
 
 <script lang="ts">
-function formatBytes(n: number): string {
+function fmtBytes(n: number): string {
   if (n < 1024) return n + ' B'
   if (n < 1048576) return (n / 1024).toFixed(1) + ' KB'
   return (n / 1048576).toFixed(1) + ' MB'

@@ -73,7 +73,7 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string) {
 
 	for _, c := range h.clients {
 		for _, r := range c.Routes {
-			if r.Host != host {
+			if r.Host != host || (r.Type != "" && r.Type != "http") {
 				continue
 			}
 			if r.PathPrefix != "" {
@@ -85,7 +85,6 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string) {
 					}
 				}
 			} else {
-				// host-only match, lowest priority
 				if bestLen < 0 {
 					bestClient = c
 					bestTarget = r.Target
@@ -94,6 +93,56 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string) {
 		}
 	}
 	return bestClient, bestTarget
+}
+
+// MatchTCPRoute finds a client+target for a TCP port.
+func (h *Hub) MatchTCPRoute(port int) (*ClientConn, string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, c := range h.clients {
+		for _, r := range c.Routes {
+			if r.Type == "tcp" && r.RemotePort == port {
+				return c, r.Target
+			}
+		}
+	}
+	return nil, ""
+}
+
+// UpdateRoutes sets routes for a client and returns the new routes.
+func (h *Hub) UpdateRoutes(clientID string, routes []proto.Route) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c, ok := h.clients[clientID]
+	if !ok {
+		return false
+	}
+	c.Routes = routes
+	return true
+}
+
+// AddRoute adds a route to a client.
+func (h *Hub) AddRoute(clientID string, route proto.Route) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c, ok := h.clients[clientID]
+	if !ok {
+		return false
+	}
+	c.Routes = append(c.Routes, route)
+	return true
+}
+
+// RemoveRoute removes a route from a client by index.
+func (h *Hub) RemoveRoute(clientID string, idx int) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c, ok := h.clients[clientID]
+	if !ok || idx < 0 || idx >= len(c.Routes) {
+		return false
+	}
+	c.Routes = append(c.Routes[:idx], c.Routes[idx+1:]...)
+	return true
 }
 
 // All returns all connected clients for the dashboard.
@@ -113,6 +162,8 @@ func (h *Hub) AllRoutes() []struct {
 	Host       string `json:"host"`
 	PathPrefix string `json:"path_prefix"`
 	Target     string `json:"target"`
+	Type       string `json:"type"`
+	RemotePort int    `json:"remote_port"`
 } {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -121,6 +172,8 @@ func (h *Hub) AllRoutes() []struct {
 		Host       string `json:"host"`
 		PathPrefix string `json:"path_prefix"`
 		Target     string `json:"target"`
+		Type       string `json:"type"`
+		RemotePort int    `json:"remote_port"`
 	}
 	for _, c := range h.clients {
 		for _, r := range c.Routes {
@@ -129,7 +182,9 @@ func (h *Hub) AllRoutes() []struct {
 				Host       string `json:"host"`
 				PathPrefix string `json:"path_prefix"`
 				Target     string `json:"target"`
-			}{c.ID, r.Host, r.PathPrefix, r.Target})
+				Type       string `json:"type"`
+				RemotePort int    `json:"remote_port"`
+			}{c.ID, r.Host, r.PathPrefix, r.Target, r.Type, r.RemotePort})
 		}
 	}
 	return routes

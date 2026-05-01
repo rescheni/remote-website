@@ -1,8 +1,8 @@
 package server
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -27,16 +27,18 @@ type Server struct {
 	Stats            *Stats
 	Config           *ServerConfig
 	DashboardHandler http.Handler
+	tcpListeners     []*tcpListener
 }
 
 type ServerConfig struct {
-	HTTPPort      string
-	HTTPSPort     string
-	TunnelPort    string
-	DashboardPort string
-	TLSCert       string
-	TLSKey        string
-	Dashboard     bool
+	HTTPPort       string
+	HTTPSPort      string
+	TunnelPort     string
+	DashboardPort  string
+	TLSCert        string
+	TLSKey         string
+	Dashboard      bool
+	TCPProxyPorts  []int
 }
 
 func New(cfg *ServerConfig) *Server {
@@ -48,7 +50,12 @@ func New(cfg *ServerConfig) *Server {
 }
 
 func (s *Server) Run() error {
-	errCh := make(chan error, 4)
+	errCh := make(chan error, 6)
+
+	// TCP proxy listeners
+	if len(s.Config.TCPProxyPorts) > 0 {
+		s.tcpListeners = s.startTCPListeners(s.Config.TCPProxyPorts)
+	}
 
 	// Tunnel WebSocket server
 	go func() {
@@ -95,7 +102,6 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build request message
 	headers := make(map[string]string)
 	for k, v := range r.Header {
 		if len(v) > 0 {
@@ -117,7 +123,6 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		Body:    string(bodyBytes),
 	}
 
-	// Wait for response via a dedicated channel
 	respCh := make(chan responseMsg, 1)
 	pendingRequests.Store(reqMsg.ID, respCh)
 	defer pendingRequests.Delete(reqMsg.ID)
@@ -160,7 +165,6 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Wait for register message
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	var reg proto.Register
 	if err := wsjson.Read(ctx, conn, &reg); err != nil {
@@ -186,11 +190,9 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		LastSeen:  time.Now(),
 	}
 
-	// Remove any existing client with same ID
 	s.Hub.Remove(reg.ClientID)
 	s.Hub.Add(client)
 
-	// Read loop for responses
 	go s.readLoop(client)
 }
 
@@ -202,40 +204,52 @@ func (s *Server) readLoop(c *ClientConn) {
 	}()
 
 	for {
-		var raw json.RawMessage
-		if err := wsjson.Read(c.Ctx, c.Conn, &raw); err != nil {
+		typ, data, err := c.Conn.Read(c.Ctx)
+		if err != nil {
 			return
 		}
 		c.LastSeen = time.Now()
 
-		msgType, msg, err := proto.Decode(raw)
-		if err != nil {
-			continue
-		}
+		switch typ {
+		case websocket.MessageText:
+			msgType, msg, err := proto.Decode(data)
+			if err != nil {
+				continue
+			}
+			switch msgType {
+			case proto.TypeRes:
+				res := msg.(*proto.Response)
+				v, ok := pendingRequests.Load(res.ID)
+				if ok {
+					v.(chan responseMsg) <- responseMsg{
+						Status:  res.Status,
+						Headers: res.Headers,
+						Body:    res.Body,
+					}
+				}
+			case proto.TypeErr:
+				errMsg := msg.(*proto.Error)
+				v, ok := pendingRequests.Load(errMsg.ID)
+				if ok {
+					v.(chan responseMsg) <- responseMsg{
+						Status:  502,
+						Headers: map[string]string{"Content-Type": "text/plain"},
+						Body:    errMsg.Error,
+					}
+				}
+			case proto.TypePing:
+				c.WriteJSON(proto.Pong{Type: proto.TypePong})
+			case proto.TypeTCPClose:
+				tcpClose := msg.(*proto.TCPClose)
+				handleTCPClose(tcpClose.ID)
+			}
 
-		switch msgType {
-		case proto.TypeRes:
-			res := msg.(*proto.Response)
-			v, ok := pendingRequests.Load(res.ID)
-			if ok {
-				v.(chan responseMsg) <- responseMsg{
-					Status:  res.Status,
-					Headers: res.Headers,
-					Body:    res.Body,
-				}
+		case websocket.MessageBinary:
+			streamID, payload, err := proto.ReadTCPFrameFull(bytes.NewReader(data))
+			if err != nil {
+				continue
 			}
-		case proto.TypeErr:
-			errMsg := msg.(*proto.Error)
-			v, ok := pendingRequests.Load(errMsg.ID)
-			if ok {
-				v.(chan responseMsg) <- responseMsg{
-					Status:  502,
-					Headers: map[string]string{"Content-Type": "text/plain"},
-					Body:    errMsg.Error,
-				}
-			}
-		case proto.TypePing:
-			c.WriteJSON(proto.Pong{Type: proto.TypePong})
+			handleTCPData(c.ID, streamID, payload)
 		}
 	}
 }

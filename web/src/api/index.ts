@@ -7,7 +7,8 @@ export interface ClientInfo {
   req_count: number
   bytes_in: number
   bytes_out: number
-  routes: number
+  routes: RouteInfo[]
+  route_count: number
 }
 
 export interface RouteInfo {
@@ -15,6 +16,8 @@ export interface RouteInfo {
   host: string
   path_prefix: string
   target: string
+  type: string
+  remote_port: number
 }
 
 export interface StatsInfo {
@@ -37,4 +40,18 @@ export async function fetchRoutes(): Promise<RouteInfo[]> {
 export async function fetchStats(): Promise<StatsInfo> {
   const res = await fetch(`${BASE}/stats`)
   return res.json()
+}
+
+export async function addRoute(clientId: string, route: RouteInfo): Promise<void> {
+  await fetch(`${BASE}/routes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: clientId, route }),
+  })
+}
+
+export async function deleteRoute(clientId: string, idx: number): Promise<void> {
+  await fetch(`${BASE}/routes?client=${encodeURIComponent(clientId)}&idx=${idx}`, {
+    method: 'DELETE',
+  })
 }

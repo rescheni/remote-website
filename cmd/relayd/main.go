@@ -24,6 +24,9 @@ type Config struct {
 		Tunnel    string `yaml:"tunnel"`
 		Dashboard string `yaml:"dashboard"`
 	} `yaml:"listen"`
+	TCPUDP struct {
+		Proxy []int `yaml:"tcp_proxy"`
+	} `yaml:"tcp_udp"`
 	Dashboard struct {
 		Enabled bool `yaml:"enabled"`
 	} `yaml:"dashboard"`
@@ -49,6 +52,7 @@ func main() {
 		TunnelPort:    cfg.Listen.Tunnel,
 		DashboardPort: cfg.Listen.Dashboard,
 		Dashboard:     cfg.Dashboard.Enabled,
+		TCPProxyPorts: cfg.TCPUDP.Proxy,
 	})
 
 	// Set up dashboard handler
@@ -70,6 +74,9 @@ func main() {
 	fmt.Println("=== relayd starting ===")
 	fmt.Printf("HTTP proxy:  %s\n", cfg.Listen.HTTP)
 	fmt.Printf("Tunnel WS:   %s\n", cfg.Listen.Tunnel)
+	for _, p := range cfg.TCPUDP.Proxy {
+		fmt.Printf("TCP proxy:   :%d\n", p)
+	}
 	if cfg.Dashboard.Enabled {
 		fmt.Printf("Dashboard:   %s\n", cfg.Listen.Dashboard)
 	}
