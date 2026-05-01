@@ -1,0 +1,18 @@
+services:
+  relayd:
+    build: .
+    container_name: relayd
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8443:8443"
+      - "7500:7500"
+    volumes:
+      - ./config.yaml:/etc/relayd/config.yaml:ro
+      - relayd_data:/data
+    environment:
+      - TZ=Asia/Shanghai
+
+volumes:
+  relayd_data:

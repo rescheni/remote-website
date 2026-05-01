@@ -1,0 +1,8 @@
+listen:
+  http: ":80"
+  https: ":443"
+  tunnel: ":8443"
+  dashboard: ":7500"
+
+dashboard:
+  enabled: true
