@@ -195,6 +195,10 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 			reg.ClientID,
 			time.Since(existing.Connected).Round(time.Second),
 			time.Since(existing.LastSeen).Round(time.Second))
+		if len(existing.Routes) > 0 {
+			client.Routes = existing.Routes
+			log.Printf("preserved %d routes from previous connection", len(existing.Routes))
+		}
 	}
 	s.Hub.Remove(reg.ClientID)
 	s.Hub.Add(client)

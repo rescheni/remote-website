@@ -150,6 +150,9 @@ func heartbeat(ctx context.Context, conn *websocket.Conn, interval time.Duration
 
 func handleRequest(ctx context.Context, conn *websocket.Conn, req *proto.Request) {
 	targetURL := req.Target + req.Path
+	if !strings.Contains(targetURL, "://") {
+		targetURL = "http://" + targetURL
+	}
 	bodyReader := strings.NewReader(req.Body)
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, targetURL, bodyReader)
 	if err != nil {
