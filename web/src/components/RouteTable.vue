@@ -56,7 +56,7 @@ async function handleAdd() {
         <span v-if="error" class="err">{{ error }}</span>
       </div>
 
-      <table v-if="selectedClient.routes.length > 0">
+      <table v-if="selectedClient.routes && selectedClient.routes.length > 0">
         <thead>
           <tr>
             <th>Type</th>

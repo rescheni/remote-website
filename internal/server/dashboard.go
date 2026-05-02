@@ -24,6 +24,10 @@ func (s *Server) handleAPIClients(w http.ResponseWriter, r *http.Request) {
 	}
 	list := make([]clientInfo, 0, len(clients))
 	for _, c := range clients {
+		routes := c.Routes
+		if routes == nil {
+			routes = []proto.Route{}
+		}
 		list = append(list, clientInfo{
 			ID:        c.ID,
 			Connected: c.Connected.Format("2006-01-02 15:04:05"),
@@ -31,8 +35,8 @@ func (s *Server) handleAPIClients(w http.ResponseWriter, r *http.Request) {
 			ReqCount:  c.ReqCount,
 			BytesIn:   c.BytesIn,
 			BytesOut:  c.BytesOut,
-			Routes:    c.Routes,
-			RouteCnt:  len(c.Routes),
+			Routes:    routes,
+			RouteCnt:  len(routes),
 		})
 	}
 	json.NewEncoder(w).Encode(list)
