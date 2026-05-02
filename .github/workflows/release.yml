@@ -52,16 +52,23 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Generate changelog
-        id: changelog
-        uses: metcalfc/changelog-generator@v4
-        with:
-          myToken: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build binaries
+        run: |
+          for p in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            GOOS=${p%/*} GOARCH=${p#*/}
+            ext=""
+            [ "$GOOS" = "windows" ] && ext=".exe"
+            go build -ldflags="-s -w" -o "relayd-${GOOS}-${GOARCH}${ext}" ./cmd/relayd
+            go build -ldflags="-s -w" -o "relayc-${GOOS}-${GOARCH}${ext}" ./cmd/relayc
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
-          body: ${{ steps.changelog.outputs.changelog }}
+          generate_release_notes: true
           draft: false
           prerelease: false
+          files: |
+            relayd-*
+            relayc-*

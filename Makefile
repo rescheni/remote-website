@@ -25,5 +25,5 @@ all: web build
 
 clean:
 	rm -rf $(BINARY_DIR)
-	rm -rf web/dist
+	rm -rf cmd/relayd/web/dist
 	rm -rf web/node_modules

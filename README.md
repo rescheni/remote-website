@@ -14,25 +14,34 @@ Lightweight reverse proxy tunnel for NAT traversal, inspired by frp.
 
 ## Quick Start
 
-### Server (Docker)
+### Server (relayd) — Docker
 
 ```bash
+curl -O https://raw.githubusercontent.com/<user>/<repo>/main/docker-compose.yaml
+curl -O https://raw.githubusercontent.com/<user>/<repo>/main/config.example.yaml
 cp config.example.yaml config.yaml
-# edit config.yaml with your ports
+# edit config.yaml with your domain and ports
 docker compose up -d
 ```
 
-### Server (Binary)
+### Server (relayd) — Binary
 
 ```bash
+curl -L -o relayd https://github.com/<user>/<repo>/releases/latest/download/relayd-linux-amd64
+chmod +x relayd
+curl -O https://raw.githubusercontent.com/<user>/<repo>/main/config.example.yaml
+cp config.example.yaml config.yaml
 ./relayd -config config.yaml
 ```
 
-### Client
+### Client (relayc) — Binary
 
 ```bash
+curl -L -o relayc https://github.com/<user>/<repo>/releases/latest/download/relayc-linux-amd64
+chmod +x relayc
+curl -O https://raw.githubusercontent.com/<user>/<repo>/main/client.example.yaml
 cp client.example.yaml client.yaml
-# edit client.yaml with your server address and routes
+# edit client.yaml with your server address
 ./relayc -config client.yaml
 ```
 
