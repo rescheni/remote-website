@@ -174,10 +174,10 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 // Captures: attribute=" / path ", avoiding protocol-relative (//) and
 // absolute URLs (http://, https://, data:).
 var pathRewriteRE = regexp.MustCompile(
-	`((?:src|href|action)\s*=\s*["'])\s*(/(?!/)(?:[^"'\s]*))\s*(["'])`)
+	`((?:src|href|action)\s*=\s*["'])\s*(/[^/\s][^"'\s]*)\s*(["'])`)
 
 var cssURLRewriteRE = regexp.MustCompile(
-	`(url\(\s*["']?)\s*(/(?!/)(?:[^)"'\s]*))\s*(["']?\s*\))`)
+	`(url\(\s*["']?)\s*(/[^/\s][^)"'\s]*)\s*(["']?\s*\))`)
 
 func isHTML(headers map[string]string) bool {
 	ct := headers["Content-Type"]
