@@ -100,9 +100,11 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	client, target, pathPrefix := s.Hub.MatchRoute(host, r.URL.Path)
 	if client == nil {
+		log.Printf("no route: host=%s path=%s", host, r.URL.Path)
 		http.Error(w, "no route for "+host+r.URL.Path, http.StatusNotFound)
 		return
 	}
+	log.Printf("route match: host=%s path=%s target=%s prefix=%q", host, r.URL.Path, target, pathPrefix)
 
 	headers := make(map[string]string)
 	for k, v := range r.Header {
@@ -154,9 +156,15 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		s.Stats.TotalBytesOut.Add(int64(len(resp.Body)))
 		client.BytesOut += int64(len(resp.Body))
 		body := resp.Body
-		if pathPrefix != "" && isHTML(resp.Headers) {
-			body = rewriteResponseBody(body, pathPrefix)
-			delete(resp.Headers, "Content-Length")
+		if pathPrefix != "" {
+			if isHTML(resp.Headers) {
+				origLen := len(body)
+				body = rewriteResponseBody(body, pathPrefix)
+				log.Printf("rewrite: prefix=%s, body %d->%d bytes", pathPrefix, origLen, len(body))
+				delete(resp.Headers, "Content-Length")
+			} else {
+				log.Printf("rewrite: skipped prefix=%s, content-type=%q", pathPrefix, resp.Headers["Content-Type"])
+			}
 		}
 		for k, v := range resp.Headers {
 			w.Header().Set(k, v)
