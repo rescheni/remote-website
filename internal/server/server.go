@@ -7,6 +7,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"regexp"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -96,7 +98,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		host = h
 	}
 
-	client, target := s.Hub.MatchRoute(host, r.URL.Path)
+	client, target, pathPrefix := s.Hub.MatchRoute(host, r.URL.Path)
 	if client == nil {
 		http.Error(w, "no route for "+host+r.URL.Path, http.StatusNotFound)
 		return
@@ -110,17 +112,28 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	headers["X-Forwarded-Host"] = host
 
+	// Strip path prefix so the client requests the clean path from the local backend.
+	// The prefix is re-injected into HTML responses via rewriteResponseBody.
+	reqPath := r.URL.RequestURI()
+	if pathPrefix != "" && strings.HasPrefix(reqPath, pathPrefix) {
+		reqPath = reqPath[len(pathPrefix):]
+		if reqPath == "" {
+			reqPath = "/"
+		}
+	}
+
 	bodyBytes, _ := io.ReadAll(r.Body)
 	r.Body.Close()
 
 	reqMsg := proto.Request{
-		Type:    proto.TypeReq,
-		ID:      newRequestID(),
-		Method:  r.Method,
-		Path:    r.URL.RequestURI(),
-		Target:  target,
-		Headers: headers,
-		Body:    string(bodyBytes),
+		Type:       proto.TypeReq,
+		ID:         newRequestID(),
+		Method:     r.Method,
+		Path:       reqPath,
+		Target:     target,
+		PathPrefix: pathPrefix,
+		Headers:    headers,
+		Body:       string(bodyBytes),
 	}
 
 	respCh := make(chan responseMsg, 1)
@@ -140,14 +153,50 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	case resp := <-respCh:
 		s.Stats.TotalBytesOut.Add(int64(len(resp.Body)))
 		client.BytesOut += int64(len(resp.Body))
+		body := resp.Body
+		if pathPrefix != "" && isHTML(resp.Headers) {
+			body = rewriteResponseBody(body, pathPrefix)
+		}
 		for k, v := range resp.Headers {
 			w.Header().Set(k, v)
 		}
 		w.WriteHeader(resp.Status)
-		w.Write([]byte(resp.Body))
+		w.Write([]byte(body))
 	case <-time.After(30 * time.Second):
 		http.Error(w, "tunnel timeout", http.StatusGatewayTimeout)
 	}
+}
+
+// Path rewriting regexp: matches absolute paths in HTML/CSS attributes,
+// rewriting them to include the path prefix so the browser routes requests
+// through the relay server correctly.
+//
+// Captures: attribute=" / path ", avoiding protocol-relative (//) and
+// absolute URLs (http://, https://, data:).
+var pathRewriteRE = regexp.MustCompile(
+	`((?:src|href|action)\s*=\s*["'])\s*(/(?!/)(?:[^"'\s]*))\s*(["'])`)
+
+var cssURLRewriteRE = regexp.MustCompile(
+	`(url\(\s*["']?)\s*(/(?!/)(?:[^)"'\s]*))\s*(["']?\s*\))`)
+
+func isHTML(headers map[string]string) bool {
+	ct := headers["Content-Type"]
+	return strings.Contains(ct, "text/html") || strings.Contains(ct, "application/xhtml")
+}
+
+func rewriteResponseBody(body, prefix string) string {
+	// Ensure prefix has leading / and no trailing /
+	prefix = "/" + strings.Trim(prefix, "/")
+	// Handle the special case where prefix is just "/"
+	if prefix == "/" {
+		return body
+	}
+
+	// Rewrite src="/path", href="/path", action="/path"
+	body = pathRewriteRE.ReplaceAllString(body, `${1}${prefix}${2}${3}`)
+	// Rewrite url(/path) in CSS
+	body = cssURLRewriteRE.ReplaceAllString(body, `${1}${prefix}${2}${3}`)
+	return body
 }
 
 type responseMsg struct {

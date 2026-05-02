@@ -87,12 +87,13 @@ type routeMatch struct {
 // MatchRoute finds all clients matching a host+path and picks one at random
 // for load balancing across clients with the same route.
 // Priority: exact host+path_prefix match > host-only match.
-func (h *Hub) MatchRoute(host, path string) (*ClientConn, string) {
+func (h *Hub) MatchRoute(host, path string) (*ClientConn, string, string) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
 	var matches []routeMatch
 	bestLen := -1
+	bestPrefix := ""
 
 	for _, c := range h.clients {
 		for _, r := range c.Routes {
@@ -103,6 +104,7 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string) {
 				if len(path) >= len(r.PathPrefix) && path[:len(r.PathPrefix)] == r.PathPrefix {
 					if len(r.PathPrefix) > bestLen {
 						bestLen = len(r.PathPrefix)
+						bestPrefix = r.PathPrefix
 						matches = []routeMatch{{c, r.Target}}
 					} else if len(r.PathPrefix) == bestLen {
 						matches = append(matches, routeMatch{c, r.Target})
@@ -116,10 +118,10 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string) {
 		}
 	}
 	if len(matches) == 0 {
-		return nil, ""
+		return nil, "", ""
 	}
 	m := matches[rand.Intn(len(matches))]
-	return m.client, m.target
+	return m.client, m.target, bestPrefix
 }
 
 // MatchTCPRoute finds all clients matching a TCP port and picks one at random

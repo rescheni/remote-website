@@ -43,13 +43,14 @@ type Pong struct {
 }
 
 type Request struct {
-	Type    MsgType           `json:"type"`
-	ID      string            `json:"id"`
-	Method  string            `json:"method"`
-	Path    string            `json:"path"`
-	Target  string            `json:"target"`
-	Headers map[string]string `json:"headers"`
-	Body    string            `json:"body"`
+	Type       MsgType           `json:"type"`
+	ID         string            `json:"id"`
+	Method     string            `json:"method"`
+	Path       string            `json:"path"`
+	Target     string            `json:"target"`
+	PathPrefix string            `json:"path_prefix,omitempty"`
+	Headers    map[string]string `json:"headers"`
+	Body       string            `json:"body"`
 }
 
 type Response struct {
