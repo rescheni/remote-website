@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"math/rand"
+	"net"
 	"sync"
 	"time"
 
@@ -97,7 +98,11 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string, string) {
 
 	for _, c := range h.clients {
 		for _, r := range c.Routes {
-			if r.Host != host || (r.Type != "" && r.Type != "http") {
+			routeHost := r.Host
+			if h, _, err := net.SplitHostPort(routeHost); err == nil {
+				routeHost = h
+			}
+			if routeHost != host || (r.Type != "" && r.Type != "http") {
 				continue
 			}
 			if r.PathPrefix != "" {

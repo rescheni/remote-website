@@ -156,6 +156,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		body := resp.Body
 		if pathPrefix != "" && isHTML(resp.Headers) {
 			body = rewriteResponseBody(body, pathPrefix)
+			delete(resp.Headers, "Content-Length")
 		}
 		for k, v := range resp.Headers {
 			w.Header().Set(k, v)
