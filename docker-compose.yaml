@@ -1,13 +1,13 @@
 services:
   relayd:
-    build: .
+    image: ghcr.io/rescheni/remote-website:latest
     container_name: relayd
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
-      - "8443:8443"
-      - "7500:7500"
+      - "80:80"       # HTTP proxy (external web traffic)
+      - "443:443"     # HTTPS proxy (external web traffic)
+      - "1443:1443"   # Tunnel WS (clients connect to this)
+      - "17500:17500" # Dashboard web UI
     volumes:
       - ./config.yaml:/etc/relayd/config.yaml:ro
       - relayd_data:/data

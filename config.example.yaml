@@ -1,13 +1,17 @@
+# relayd server configuration
 listen:
-  http: ":80"
-  https: ":443"
-  tunnel: ":8443"
-  dashboard: ":7500"
+  http: ":80"         # HTTP proxy — external users access your sites here
+  https: ":443"       # HTTPS proxy — external users access your sites here (TLS)
+  tunnel: ":1443"     # Tunnel port — relayc clients connect to this (WebSocket)
+  dashboard: ":17500" # Dashboard web UI — manage routes, view connected clients
 
 tcp_udp:
   tcp_proxy:
-    - 2222   # SSH proxy
-    - 5432   # Postgres proxy
+    # Add TCP ports you want to expose through the tunnel.
+    # relayc will map these to its local services.
+    # Examples below — remove or change as needed:
+    # - 2222   # e.g. SSH proxy
+    # - 5432   # e.g. Postgres proxy
 
 dashboard:
   enabled: true
