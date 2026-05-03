@@ -202,9 +202,12 @@ func rewriteResponseBody(body, prefix string) string {
 	}
 
 	// Rewrite src="/path", href="/path", action="/path"
-	body = pathRewriteRE.ReplaceAllString(body, `${1}${prefix}${2}${3}`)
+	// NOTE: ${prefix} inside the replacement string is NOT a Go variable —
+	// it is a Go regexp capture-group reference (to a group named "prefix").
+	// We must concatenate the Go prefix variable outside the pattern.
+	body = pathRewriteRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
 	// Rewrite url(/path) in CSS
-	body = cssURLRewriteRE.ReplaceAllString(body, `${1}${prefix}${2}${3}`)
+	body = cssURLRewriteRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
 	return body
 }
 
