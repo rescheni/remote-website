@@ -202,6 +202,14 @@ var jsImportExportRE = regexp.MustCompile(
 var jsDynamicImportRE = regexp.MustCompile(
 	`(import\s*\(\s*["'])\s*(/[^/\s][^)"'\s]*)\s*(["']\s*\))`)
 
+// Rewrites fetch() and axios-style HTTP call paths in JavaScript:
+//
+//	fetch("/api/x")      →  fetch("/prefix/api/x")
+//	.get("/api/x")       →  .get("/prefix/api/x")
+//	.post("/api/x", d)   →  .post("/prefix/api/x", d)
+var jsHTTPCallRE = regexp.MustCompile(
+	`((?:\.(?:get|post|put|delete|patch)\s*\(|fetch\s*\()\s*["'])(/[^/\s][^"'\s]*)\s*(["'])`)
+
 func shouldRewrite(headers map[string]string) bool {
 	ct := headers["Content-Type"]
 	return strings.Contains(ct, "text/html") ||
@@ -230,6 +238,8 @@ func rewriteResponseBody(body, prefix string) string {
 	body = jsImportExportRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
 	// Rewrite import("/path") in JS
 	body = jsDynamicImportRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
+	// Rewrite fetch("/path") and .get("/path") etc. in JS
+	body = jsHTTPCallRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
 	return body
 }
 
