@@ -16,6 +16,8 @@ import (
 	"relay-tunnel/internal/proto"
 )
 
+var version = "dev"
+
 type Config struct {
 	Server struct {
 		Addr   string `yaml:"addr"`
@@ -109,7 +111,7 @@ func main() {
 		})
 	}
 
-	fmt.Printf("=== relayc starting ===\n")
+	fmt.Printf("=== relayc %s ===\n", version)
 	fmt.Printf("Server: %s (tls=%v)\n", cfg.Server.Addr, cfg.Server.TLS)
 	fmt.Printf("Client ID: %s\n", cfg.Client.ID)
 	if len(routes) > 0 {

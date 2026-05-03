@@ -2,7 +2,8 @@
 
 BINARY_DIR=bin
 GO=go
-GOFLAGS=-ldflags="-s -w"
+VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GOFLAGS=-ldflags="-s -w -X main.version=$(VERSION)"
 
 build: build-linux-amd64 build-linux-arm64 build-darwin-amd64
 

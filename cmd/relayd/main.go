@@ -17,6 +17,8 @@ import (
 //go:embed web/dist/*
 var webAssets embed.FS
 
+var version = "dev"
+
 type Config struct {
 	Listen struct {
 		HTTP      string `yaml:"http"`
@@ -71,7 +73,7 @@ func main() {
 		}
 	}
 
-	fmt.Println("=== relayd starting ===")
+	fmt.Printf("=== relayd %s ===\n", version)
 	fmt.Printf("HTTP proxy:  %s\n", cfg.Listen.HTTP)
 	fmt.Printf("Tunnel WS:   %s\n", cfg.Listen.Tunnel)
 	for _, p := range cfg.TCPUDP.Proxy {
