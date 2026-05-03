@@ -254,14 +254,14 @@ func (s *Server) handleWSProxy(w http.ResponseWriter, r *http.Request, client *C
 	// Read from browser WS → binary frames → relayc tunnel WS
 	ctx := context.Background()
 	for {
-		typ, data, err := wsConn.Read(ctx)
+		_, data, err := wsConn.Read(ctx)
 		if err != nil {
 			return
 		}
 		var frame bytes.Buffer
 		proto.WriteTCPFrameFull(&frame, id, data)
 		client.mu.Lock()
-		client.Conn.Write(client.Ctx, typ, frame.Bytes())
+		client.Conn.Write(client.Ctx, websocket.MessageBinary, frame.Bytes())
 		client.mu.Unlock()
 		client.BytesIn += int64(len(data))
 		s.Stats.TotalBytesIn.Add(int64(len(data)))
@@ -300,13 +300,10 @@ var jsImportExportRE = regexp.MustCompile(
 var jsDynamicImportRE = regexp.MustCompile(
 	`(import\s*\(\s*)(["'])\s*/([^/\s][^)"'\s]*)\s*(["']\s*\))`)
 
-// Rewrites fetch() and axios-style HTTP call paths in JavaScript:
-//
-//	fetch("/api/x")      →  fetch("/prefix/api/x")
-//	.get("/api/x")       →  .get("/prefix/api/x")
-//	.post("/api/x", d)   →  .post("/prefix/api/x", d)
-var jsHTTPCallRE = regexp.MustCompile(
-	`((?:\.(?:get|post|put|delete|patch)\s*\(|fetch\s*\()\s*)(["'])\s*/([^/\s][^"'\s]*)\s*(["'])`)
+// NOTE: Individual HTTP call path rewriting (fetch, .get, .post, etc.) is intentionally
+// omitted — it conflicts with jsBaseURLRE when the frontend uses axios with baseURL.
+// Rewriting both produces double prefixes like /zz/api/zz/auth/login.
+// The jsBaseURLRE rewrite is sufficient for axios-based apps.
 
 // Rewrites baseURL (axios) and similar API base path configs.
 //
@@ -346,8 +343,9 @@ func rewriteResponseBody(body, prefix string) string {
 	body = jsImportExportRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
 	// Rewrite import("/path") in JS
 	body = jsDynamicImportRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
-	// Rewrite fetch("/path") and .get("/path") etc. in JS
-	body = jsHTTPCallRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
+	// NOTE: jsHTTPCallRE removed — it conflicts with jsBaseURLRE when the
+	// frontend uses axios with baseURL. Rewriting both produces double prefixes
+	// like /zz/api/zz/auth/login. The jsBaseURLRE rewrite is sufficient.
 	// Rewrite baseURL: "/api" in axios configs
 	body = jsBaseURLRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
 	return body

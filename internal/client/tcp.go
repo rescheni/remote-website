@@ -131,13 +131,13 @@ func handleWSConnect(msg *proto.WSConnect, wsConn *websocket.Conn) {
 	go func() {
 		ctx := context.Background()
 		for {
-			typ, data, err := conn.Read(ctx)
+			_, data, err := conn.Read(ctx)
 			if err != nil {
 				break
 			}
 			var frame bytes.Buffer
 			proto.WriteTCPFrameFull(&frame, msg.ID, data)
-			wsConn.Write(ctx, typ, frame.Bytes())
+			wsConn.Write(ctx, websocket.MessageBinary, frame.Bytes())
 		}
 		close(p.done)
 	}()
