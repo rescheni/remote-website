@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -32,6 +33,51 @@ var (
 		mu      sync.Mutex
 	}{streams: make(map[string]*tcpStream)}
 )
+
+// --- WS stream (for Vite HMR proxying) ---
+
+type wsStream struct {
+	ID       string
+	ClientID string
+	Conn     *websocket.Conn
+}
+
+var (
+	wsStreamsMgr = struct {
+		streams map[string]*wsStream
+		mu      sync.Mutex
+	}{streams: make(map[string]*wsStream)}
+)
+
+func handleWSData(clientID, streamID string, data []byte) {
+	wsStreamsMgr.mu.Lock()
+	s, ok := wsStreamsMgr.streams[streamID]
+	wsStreamsMgr.mu.Unlock()
+	if !ok || s.ClientID != clientID {
+		return
+	}
+	// Vite HMR uses text frames (JSON). Relay as text.
+	s.Conn.Write(context.Background(), websocket.MessageText, data)
+}
+
+func getWSStream(streamID string) (*wsStream, bool) {
+	wsStreamsMgr.mu.Lock()
+	s, ok := wsStreamsMgr.streams[streamID]
+	wsStreamsMgr.mu.Unlock()
+	return s, ok
+}
+
+func handleWSClose(streamID string) {
+	wsStreamsMgr.mu.Lock()
+	s, ok := wsStreamsMgr.streams[streamID]
+	if ok {
+		delete(wsStreamsMgr.streams, streamID)
+	}
+	wsStreamsMgr.mu.Unlock()
+	if ok {
+		s.Conn.Close(websocket.StatusNormalClosure, "")
+	}
+}
 
 func (s *Server) startTCPListeners(ports []int) []*tcpListener {
 	var listeners []*tcpListener

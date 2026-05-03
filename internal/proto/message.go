@@ -18,6 +18,8 @@ const (
 	TypeTCPConnect  MsgType = "tcp_connect"
 	TypeTCPClose    MsgType = "tcp_close"
 	TypeRouteUpdate MsgType = "route_update"
+	TypeWSConnect   MsgType = "ws_connect"
+	TypeWSClose     MsgType = "ws_close"
 )
 
 type Route struct {
@@ -84,6 +86,21 @@ type RouteUpdate struct {
 	Routes []Route `json:"routes"`
 }
 
+// WSConnect tells the relay client to open a WebSocket connection to a local
+// target (used for Vite HMR proxying).
+type WSConnect struct {
+	Type    MsgType           `json:"type"`
+	ID      string            `json:"id"`
+	Target  string            `json:"target"`
+	Path    string            `json:"path"`
+	Headers map[string]string `json:"headers"`
+}
+
+type WSClose struct {
+	Type MsgType `json:"type"`
+	ID   string  `json:"id"`
+}
+
 func Decode(data []byte) (MsgType, any, error) {
 	var header struct {
 		Type MsgType `json:"type"`
@@ -138,6 +155,18 @@ func Decode(data []byte) (MsgType, any, error) {
 			return "", nil, err
 		}
 		return TypeRouteUpdate, &m, nil
+	case TypeWSConnect:
+		var m WSConnect
+		if err := json.Unmarshal(data, &m); err != nil {
+			return "", nil, err
+		}
+		return TypeWSConnect, &m, nil
+	case TypeWSClose:
+		var m WSClose
+		if err := json.Unmarshal(data, &m); err != nil {
+			return "", nil, err
+		}
+		return TypeWSClose, &m, nil
 	default:
 		return header.Type, nil, nil
 	}

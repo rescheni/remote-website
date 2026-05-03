@@ -120,6 +120,10 @@ func connect(cfg *Config) error {
 				stopTCPProxy(msg.(*proto.TCPClose).ID)
 			case proto.TypeRouteUpdate:
 				handleRouteUpdate(cfg, msg.(*proto.RouteUpdate))
+			case proto.TypeWSConnect:
+				go handleWSConnect(msg.(*proto.WSConnect), conn)
+			case proto.TypeWSClose:
+				stopWSProxy(msg.(*proto.WSClose).ID)
 			case proto.TypePong:
 				// ignore
 			}
@@ -129,7 +133,12 @@ func connect(cfg *Config) error {
 			if err != nil {
 				continue
 			}
-			handleTCPDataFromServer(streamID, payload)
+			// Route to the appropriate proxy type.
+			if _, ok := getWSProxy(streamID); ok {
+				handleWSDataFromServer(streamID, payload)
+			} else {
+				handleTCPDataFromServer(streamID, payload)
+			}
 		}
 	}
 }

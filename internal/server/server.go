@@ -106,6 +106,12 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("route match: host=%s path=%s target=%s prefix=%q", host, r.URL.Path, target, pathPrefix)
 
+	// WebSocket upgrade detection (Vite HMR, etc.)
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		s.handleWSProxy(w, r, client, target, pathPrefix)
+		return
+	}
+
 	headers := make(map[string]string)
 	for k, v := range r.Header {
 		if len(v) > 0 {
@@ -174,6 +180,82 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	case <-time.After(30 * time.Second):
 		log.Printf("timeout: host=%s path=%s target=%s client=%s", host, r.URL.Path, target, client.ID)
 		http.Error(w, "tunnel timeout", http.StatusGatewayTimeout)
+	}
+}
+
+// handleWSProxy accepts the browser's WebSocket upgrade, relays it through the
+// tunnel to relayc, which dials the local target (e.g. Vite HMR server).
+func (s *Server) handleWSProxy(w http.ResponseWriter, r *http.Request, client *ClientConn, target, pathPrefix string) {
+	// Strip path prefix (same logic as handleHTTP)
+	wsPath := r.URL.RequestURI()
+	if pathPrefix != "" && strings.HasPrefix(wsPath, pathPrefix) {
+		wsPath = wsPath[len(pathPrefix):]
+		if wsPath == "" {
+			wsPath = "/"
+		}
+	}
+
+	// Collect the upgrade headers to forward to relayc
+	headers := make(map[string]string)
+	for k, v := range r.Header {
+		if len(v) > 0 {
+			headers[k] = v[0]
+		}
+	}
+
+	// Accept the browser's WebSocket upgrade (writes 101 to browser)
+	wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		log.Printf("ws accept error: %v", err)
+		return
+	}
+
+	id := newRequestID()
+	stream := &wsStream{ID: id, ClientID: client.ID, Conn: wsConn}
+	wsStreamsMgr.mu.Lock()
+	wsStreamsMgr.streams[id] = stream
+	wsStreamsMgr.mu.Unlock()
+
+	defer func() {
+		wsStreamsMgr.mu.Lock()
+		delete(wsStreamsMgr.streams, id)
+		wsStreamsMgr.mu.Unlock()
+		client.WriteJSON(proto.WSClose{Type: proto.TypeWSClose, ID: id})
+		wsConn.Close(websocket.StatusNormalClosure, "")
+		log.Printf("ws stream %s closed", id)
+	}()
+
+	// Tell relayc to open a WebSocket to the local target
+	if err := client.WriteJSON(proto.WSConnect{
+		Type:    proto.TypeWSConnect,
+		ID:      id,
+		Target:  target,
+		Path:    wsPath,
+		Headers: headers,
+	}); err != nil {
+		log.Printf("ws: send WSConnect failed: %v", err)
+		return
+	}
+
+	s.Stats.TotalRequests.Add(1)
+	log.Printf("ws proxy: stream=%s target=%s%s", id, target, wsPath)
+
+	// Read from browser WS → binary frames → relayc tunnel WS
+	ctx := context.Background()
+	for {
+		typ, data, err := wsConn.Read(ctx)
+		if err != nil {
+			return
+		}
+		var frame bytes.Buffer
+		proto.WriteTCPFrameFull(&frame, id, data)
+		client.mu.Lock()
+		client.Conn.Write(client.Ctx, typ, frame.Bytes())
+		client.mu.Unlock()
+		client.BytesIn += int64(len(data))
+		s.Stats.TotalBytesIn.Add(int64(len(data)))
 	}
 }
 
@@ -346,6 +428,9 @@ func (s *Server) readLoop(c *ClientConn) {
 			case proto.TypeTCPClose:
 				tcpClose := msg.(*proto.TCPClose)
 				handleTCPClose(tcpClose.ID)
+			case proto.TypeWSClose:
+				wsClose := msg.(*proto.WSClose)
+				handleWSClose(wsClose.ID)
 			}
 
 		case websocket.MessageBinary:
@@ -353,7 +438,12 @@ func (s *Server) readLoop(c *ClientConn) {
 			if err != nil {
 				continue
 			}
-			handleTCPData(c.ID, streamID, payload)
+			// Route to the appropriate stream type (TCP or WS).
+			if _, ok := getWSStream(streamID); ok {
+				handleWSData(c.ID, streamID, payload)
+			} else {
+				handleTCPData(c.ID, streamID, payload)
+			}
 		}
 	}
 }

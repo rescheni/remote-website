@@ -5,9 +5,12 @@ import (
 	"context"
 	"log"
 	"net"
+	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 
 	"relay-tunnel/internal/proto"
 )
@@ -78,5 +81,107 @@ func stopTCPProxy(id string) {
 	if ok {
 		p.Conn.Close()
 		log.Printf("TCP stream %s closed", id)
+	}
+}
+
+// --- WS proxy (for Vite HMR, etc.) ---
+
+type wsProxy struct {
+	ID   string
+	Conn *websocket.Conn
+	done chan struct{}
+}
+
+var (
+	wsProxies   = map[string]*wsProxy{}
+	wsProxiesMu sync.Mutex
+)
+
+func handleWSConnect(msg *proto.WSConnect, wsConn *websocket.Conn) {
+	targetURL := "ws://" + msg.Target + msg.Path
+	log.Printf("WS connect: dialing %s (stream %s)", targetURL, msg.ID)
+
+	// Dial the local WebSocket server (Vite HMR)
+	conn, _, err := websocket.Dial(context.Background(), targetURL, &websocket.DialOptions{
+		HTTPHeader: wsHeaders(msg.Headers),
+	})
+	if err != nil {
+		log.Printf("WS dial %s failed: %v (stream %s)", targetURL, err, msg.ID)
+		return
+	}
+
+	p := &wsProxy{ID: msg.ID, Conn: conn, done: make(chan struct{})}
+	wsProxiesMu.Lock()
+	wsProxies[msg.ID] = p
+	wsProxiesMu.Unlock()
+
+	log.Printf("WS stream %s: %s connected", msg.ID, targetURL)
+
+	// Vite WS → tunnel WS (binary frames)
+	go func() {
+		ctx := context.Background()
+		for {
+			typ, data, err := conn.Read(ctx)
+			if err != nil {
+				break
+			}
+			var frame bytes.Buffer
+			proto.WriteTCPFrameFull(&frame, msg.ID, data)
+			wsConn.Write(ctx, typ, frame.Bytes())
+		}
+		close(p.done)
+	}()
+
+	<-p.done
+	stopWSProxy(msg.ID)
+
+	// Tell relayd the stream is closed
+	wsjson.Write(context.Background(), wsConn, proto.WSClose{
+		Type: proto.TypeWSClose,
+		ID:   msg.ID,
+	})
+}
+
+func wsHeaders(headers map[string]string) http.Header {
+	h := http.Header{}
+	for k, v := range headers {
+		// Skip hop-by-hop and connection-specific headers
+		kl := strings.ToLower(k)
+		if kl == "connection" || kl == "upgrade" || kl == "sec-websocket-key" ||
+			kl == "sec-websocket-version" || kl == "sec-websocket-extensions" ||
+			strings.HasPrefix(kl, "x-forwarded-") {
+			continue
+		}
+		h.Set(k, v)
+	}
+	return h
+}
+
+func getWSProxy(streamID string) (*wsProxy, bool) {
+	wsProxiesMu.Lock()
+	p, ok := wsProxies[streamID]
+	wsProxiesMu.Unlock()
+	return p, ok
+}
+
+func handleWSDataFromServer(streamID string, data []byte) {
+	wsProxiesMu.Lock()
+	p, ok := wsProxies[streamID]
+	wsProxiesMu.Unlock()
+	if ok {
+		p.Conn.Write(context.Background(), websocket.MessageText, data)
+	}
+}
+
+func stopWSProxy(id string) {
+	wsProxiesMu.Lock()
+	p, ok := wsProxies[id]
+	if ok {
+		delete(wsProxies, id)
+	}
+	wsProxiesMu.Unlock()
+	if ok {
+		p.Conn.Close(websocket.StatusNormalClosure, "")
+		log.Printf("WS stream %s closed", id)
 	}
 }
