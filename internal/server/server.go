@@ -172,6 +172,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(resp.Status)
 		w.Write([]byte(body))
 	case <-time.After(30 * time.Second):
+		log.Printf("timeout: host=%s path=%s target=%s client=%s", host, r.URL.Path, target, client.ID)
 		http.Error(w, "tunnel timeout", http.StatusGatewayTimeout)
 	}
 }
