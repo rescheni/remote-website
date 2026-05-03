@@ -78,6 +78,7 @@ func connect(cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
+	conn.SetReadLimit(-1) // disable 32KB default limit for tunneled HTTP responses
 	defer conn.Close(websocket.StatusNormalClosure, "")
 	setCurrentConn(conn)
 	defer setCurrentConn(nil)

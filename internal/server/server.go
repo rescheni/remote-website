@@ -157,7 +157,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		client.BytesOut += int64(len(resp.Body))
 		body := resp.Body
 		if pathPrefix != "" {
-			if isHTML(resp.Headers) {
+			if shouldRewrite(resp.Headers) {
 				origLen := len(body)
 				body = rewriteResponseBody(body, pathPrefix)
 				log.Printf("rewrite: prefix=%s, body %d->%d bytes", pathPrefix, origLen, len(body))
@@ -189,9 +189,26 @@ var pathRewriteRE = regexp.MustCompile(
 var cssURLRewriteRE = regexp.MustCompile(
 	`(url\(\s*["']?)\s*(/[^/\s][^)"'\s]*)\s*(["']?\s*\))`)
 
-func isHTML(headers map[string]string) bool {
+// Rewrites static import/export absolute paths in JavaScript:
+//
+//	import "/path"  →  import "/prefix/path"
+//	from "/path"    →  from "/prefix/path"
+var jsImportExportRE = regexp.MustCompile(
+	`(\bimport\s+["']|\bfrom\s+["'])\s*(/[^/\s][^"'\s]*)\s*(["'])`)
+
+// Rewrites dynamic import() absolute paths in JavaScript:
+//
+//	import("/path")  →  import("/prefix/path")
+var jsDynamicImportRE = regexp.MustCompile(
+	`(import\s*\(\s*["'])\s*(/[^/\s][^)"'\s]*)\s*(["']\s*\))`)
+
+func shouldRewrite(headers map[string]string) bool {
 	ct := headers["Content-Type"]
-	return strings.Contains(ct, "text/html") || strings.Contains(ct, "application/xhtml")
+	return strings.Contains(ct, "text/html") ||
+		strings.Contains(ct, "application/xhtml") ||
+		strings.Contains(ct, "text/javascript") ||
+		strings.Contains(ct, "application/javascript") ||
+		strings.Contains(ct, "text/css")
 }
 
 func rewriteResponseBody(body, prefix string) string {
@@ -202,13 +219,17 @@ func rewriteResponseBody(body, prefix string) string {
 		return body
 	}
 
-	// Rewrite src="/path", href="/path", action="/path"
+	// Rewrite src="/path", href="/path", action="/path" in HTML
 	// NOTE: ${prefix} inside the replacement string is NOT a Go variable —
 	// it is a Go regexp capture-group reference (to a group named "prefix").
 	// We must concatenate the Go prefix variable outside the pattern.
 	body = pathRewriteRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
 	// Rewrite url(/path) in CSS
 	body = cssURLRewriteRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
+	// Rewrite import/export "/path" in JS
+	body = jsImportExportRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
+	// Rewrite import("/path") in JS
+	body = jsDynamicImportRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
 	return body
 }
 
@@ -226,6 +247,7 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ws accept error: %v", err)
 		return
 	}
+	conn.SetReadLimit(-1) // disable 32KB default limit for tunneled HTTP responses
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	var reg proto.Register
