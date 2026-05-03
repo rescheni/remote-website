@@ -268,30 +268,37 @@ func (s *Server) handleWSProxy(w http.ResponseWriter, r *http.Request, client *C
 	}
 }
 
-// Path rewriting regexp: matches absolute paths in HTML/CSS attributes,
-// rewriting them to include the path prefix so the browser routes requests
-// through the relay server correctly.
+// Path rewriting regexes: each has 4 capture groups:
 //
-// Captures: attribute=" / path ", avoiding protocol-relative (//) and
-// absolute URLs (http://, https://, data:).
+//	$1 = prefix before the opening quote (src=, url(, import, .post(, …)
+//	$2 = opening quote (", ', or empty for unquoted CSS urls)
+//	$3 = path WITHOUT leading /
+//	$4 = closing quote + optional suffix
+//
+// Replacement: $1$2 + prefix + /$3$4
+// Example: src="/app.js" with prefix=/zz → src="/zz/app.js"
+//
+// The leading / is a literal between $2 and $3 so it never appears inside a
+// capture group, avoiding double-slash when prefix itself starts with /.
+
 var pathRewriteRE = regexp.MustCompile(
-	`((?:src|href|action)\s*=\s*["'])\s*(/[^/\s][^"'\s]*)\s*(["'])`)
+	`((?:src|href|action)\s*=\s*)(["'])\s*/([^/\s][^"'\s]*)\s*(["'])`)
 
 var cssURLRewriteRE = regexp.MustCompile(
-	`(url\(\s*["']?)\s*(/[^/\s][^)"'\s]*)\s*(["']?\s*\))`)
+	`(url\(\s*)(["']?)\s*/([^/\s][^)"'\s]*)\s*(["']?\s*\))`)
 
 // Rewrites static import/export absolute paths in JavaScript:
 //
 //	import "/path"  →  import "/prefix/path"
 //	from "/path"    →  from "/prefix/path"
 var jsImportExportRE = regexp.MustCompile(
-	`(\bimport\s+["']|\bfrom\s+["'])\s*(/[^/\s][^"'\s]*)\s*(["'])`)
+	`(\bimport\s+|\bfrom\s+)(["'])\s*/([^/\s][^"'\s]*)\s*(["'])`)
 
 // Rewrites dynamic import() absolute paths in JavaScript:
 //
 //	import("/path")  →  import("/prefix/path")
 var jsDynamicImportRE = regexp.MustCompile(
-	`(import\s*\(\s*["'])\s*(/[^/\s][^)"'\s]*)\s*(["']\s*\))`)
+	`(import\s*\(\s*)(["'])\s*/([^/\s][^)"'\s]*)\s*(["']\s*\))`)
 
 // Rewrites fetch() and axios-style HTTP call paths in JavaScript:
 //
@@ -299,7 +306,7 @@ var jsDynamicImportRE = regexp.MustCompile(
 //	.get("/api/x")       →  .get("/prefix/api/x")
 //	.post("/api/x", d)   →  .post("/prefix/api/x", d)
 var jsHTTPCallRE = regexp.MustCompile(
-	`((?:\.(?:get|post|put|delete|patch)\s*\(|fetch\s*\()\s*["'])(/[^/\s][^"'\s]*)\s*(["'])`)
+	`((?:\.(?:get|post|put|delete|patch)\s*\(|fetch\s*\()\s*)(["'])\s*/([^/\s][^"'\s]*)\s*(["'])`)
 
 func shouldRewrite(headers map[string]string) bool {
 	ct := headers["Content-Type"]
@@ -325,15 +332,16 @@ func rewriteResponseBody(body, prefix string) string {
 	// NOTE: ${prefix} inside the replacement string is NOT a Go variable —
 	// it is a Go regexp capture-group reference (to a group named "prefix").
 	// We must concatenate the Go prefix variable outside the pattern.
-	body = pathRewriteRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
+	// Four groups: $1=prefix, $2=opening-quote, $3=path, $4=closing-quote.
+	body = pathRewriteRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
 	// Rewrite url(/path) in CSS
-	body = cssURLRewriteRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
+	body = cssURLRewriteRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
 	// Rewrite import/export "/path" in JS
-	body = jsImportExportRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
+	body = jsImportExportRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
 	// Rewrite import("/path") in JS
-	body = jsDynamicImportRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
+	body = jsDynamicImportRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
 	// Rewrite fetch("/path") and .get("/path") etc. in JS
-	body = jsHTTPCallRE.ReplaceAllString(body, "${1}"+prefix+"${2}${3}")
+	body = jsHTTPCallRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
 	return body
 }
 
