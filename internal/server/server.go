@@ -308,6 +308,12 @@ var jsDynamicImportRE = regexp.MustCompile(
 var jsHTTPCallRE = regexp.MustCompile(
 	`((?:\.(?:get|post|put|delete|patch)\s*\(|fetch\s*\()\s*)(["'])\s*/([^/\s][^"'\s]*)\s*(["'])`)
 
+// Rewrites baseURL (axios) and similar API base path configs.
+//
+//	baseURL: "/api"  →  baseURL: "/prefix/api"
+var jsBaseURLRE = regexp.MustCompile(
+	`(baseURL\s*:\s*|BASE_URL\s*[:=]\s*)(["'])/([^/\s][^"'\s]*)\s*(["'])`)
+
 func shouldRewrite(headers map[string]string) bool {
 	ct := headers["Content-Type"]
 	if ct == "" {
@@ -342,6 +348,8 @@ func rewriteResponseBody(body, prefix string) string {
 	body = jsDynamicImportRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
 	// Rewrite fetch("/path") and .get("/path") etc. in JS
 	body = jsHTTPCallRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
+	// Rewrite baseURL: "/api" in axios configs
+	body = jsBaseURLRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
 	return body
 }
 

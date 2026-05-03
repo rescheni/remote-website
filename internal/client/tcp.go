@@ -101,9 +101,19 @@ func handleWSConnect(msg *proto.WSConnect, wsConn *websocket.Conn) {
 	targetURL := "ws://" + msg.Target + msg.Path
 	log.Printf("WS connect: dialing %s (stream %s)", targetURL, msg.ID)
 
+	// Extract subprotocols from the incoming headers (e.g. vite-hmr).
+	var subprotocols []string
+	if sp := msg.Headers["Sec-Websocket-Protocol"]; sp != "" {
+		subprotocols = strings.Split(sp, ",")
+		for i := range subprotocols {
+			subprotocols[i] = strings.TrimSpace(subprotocols[i])
+		}
+	}
+
 	// Dial the local WebSocket server (Vite HMR)
 	conn, _, err := websocket.Dial(context.Background(), targetURL, &websocket.DialOptions{
-		HTTPHeader: wsHeaders(msg.Headers),
+		HTTPHeader:   wsHeaders(msg.Headers),
+		Subprotocols: subprotocols,
 	})
 	if err != nil {
 		log.Printf("WS dial %s failed: %v (stream %s)", targetURL, err, msg.ID)
@@ -149,6 +159,7 @@ func wsHeaders(headers map[string]string) http.Header {
 		kl := strings.ToLower(k)
 		if kl == "connection" || kl == "upgrade" || kl == "sec-websocket-key" ||
 			kl == "sec-websocket-version" || kl == "sec-websocket-extensions" ||
+			kl == "sec-websocket-protocol" ||
 			strings.HasPrefix(kl, "x-forwarded-") {
 			continue
 		}
