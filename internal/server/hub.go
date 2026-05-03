@@ -129,6 +129,32 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string, string) {
 	return m.client, m.target, bestPrefix
 }
 
+// MatchWSRoute finds a client by host only (ignoring path prefix), used as a
+// fallback for WebSocket upgrade requests when the path doesn't match any
+// prefix (e.g. Vite HMR connects to / instead of /zz/).
+func (h *Hub) MatchWSRoute(host string) (*ClientConn, string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	var matches []routeMatch
+	for _, c := range h.clients {
+		for _, r := range c.Routes {
+			routeHost := r.Host
+			if h, _, err := net.SplitHostPort(routeHost); err == nil {
+				routeHost = h
+			}
+			if routeHost == host && r.Type != "tcp" {
+				matches = append(matches, routeMatch{c, r.Target})
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return nil, ""
+	}
+	m := matches[rand.Intn(len(matches))]
+	return m.client, m.target
+}
+
 // MatchTCPRoute finds all clients matching a TCP port and picks one at random
 // for load balancing across clients exposing the same port.
 func (h *Hub) MatchTCPRoute(port int) (*ClientConn, string) {

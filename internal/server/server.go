@@ -99,18 +99,27 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client, target, pathPrefix := s.Hub.MatchRoute(host, r.URL.Path)
+
+	// WebSocket upgrade detection (Vite HMR, etc.)
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		if client == nil {
+			// Path didn't match a route prefix — try host-only match.
+			// Vite HMR may connect to / instead of /zz/.
+			client, target = s.Hub.MatchWSRoute(host)
+			pathPrefix = ""
+		}
+		if client != nil {
+			s.handleWSProxy(w, r, client, target, pathPrefix)
+			return
+		}
+	}
+
 	if client == nil {
 		log.Printf("no route: host=%s path=%s", host, r.URL.Path)
 		http.Error(w, "no route for "+host+r.URL.Path, http.StatusNotFound)
 		return
 	}
 	log.Printf("route match: host=%s path=%s target=%s prefix=%q", host, r.URL.Path, target, pathPrefix)
-
-	// WebSocket upgrade detection (Vite HMR, etc.)
-	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		s.handleWSProxy(w, r, client, target, pathPrefix)
-		return
-	}
 
 	headers := make(map[string]string)
 	for k, v := range r.Header {
@@ -294,6 +303,9 @@ var jsHTTPCallRE = regexp.MustCompile(
 
 func shouldRewrite(headers map[string]string) bool {
 	ct := headers["Content-Type"]
+	if ct == "" {
+		return true // Vite may omit Content-Type for TS/JS modules
+	}
 	return strings.Contains(ct, "text/html") ||
 		strings.Contains(ct, "application/xhtml") ||
 		strings.Contains(ct, "text/javascript") ||
