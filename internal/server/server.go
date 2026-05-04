@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -103,8 +104,17 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// WebSocket upgrade detection (Vite HMR, etc.)
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		if client == nil {
-			// Path didn't match a route prefix — try host-only match.
-			// Vite HMR may connect to / instead of /zz/.
+			// Path didn't match a route prefix — try to deduce from Referer header.
+			// Vite HMR connects to /?token=... without a route prefix, but the
+			// browser's Referer contains the page URL (e.g. /dev/ or /zz/).
+			if ref := r.Header.Get("Referer"); ref != "" {
+				if u, err := url.Parse(ref); err == nil {
+					client, target, pathPrefix = s.Hub.MatchRoute(host, u.Path)
+				}
+			}
+		}
+		if client == nil {
+			// Fallback: host-only match (random if multiple clients share the host).
 			client, target = s.Hub.MatchWSRoute(host)
 			pathPrefix = ""
 		}
@@ -307,9 +317,12 @@ var jsDynamicImportRE = regexp.MustCompile(
 
 // Rewrites baseURL (axios) and similar API base path configs.
 //
-//	baseURL: "/api"  →  baseURL: "/prefix/api"
-var jsBaseURLRE = regexp.MustCompile(
+//	baseURL: "/api"         →  baseURL: "/prefix/api"
+//	baseURL: "http://localhost:8080/api"  →  baseURL: "/prefix/api"
+var jsBaseURLRelRE = regexp.MustCompile(
 	`(baseURL\s*:\s*|BASE_URL\s*[:=]\s*)(["'])/([^/\s][^"'\s]*)\s*(["'])`)
+var jsBaseURLAbsRE = regexp.MustCompile(
+	`(baseURL\s*:\s*|BASE_URL\s*[:=]\s*)(["'])https?://[^/]+(/[^"'\s]*)(["'])`)
 
 func shouldRewrite(headers map[string]string) bool {
 	ct := headers["Content-Type"]
@@ -343,11 +356,13 @@ func rewriteResponseBody(body, prefix string) string {
 	body = jsImportExportRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
 	// Rewrite import("/path") in JS
 	body = jsDynamicImportRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
-	// NOTE: jsHTTPCallRE removed — it conflicts with jsBaseURLRE when the
+	// NOTE: jsHTTPCallRE removed — it conflicts with jsBaseURLRelRE when the
 	// frontend uses axios with baseURL. Rewriting both produces double prefixes
-	// like /zz/api/zz/auth/login. The jsBaseURLRE rewrite is sufficient.
+	// like /zz/api/zz/auth/login. The jsBaseURLRelRE rewrite is sufficient.
 	// Rewrite baseURL: "/api" in axios configs
-	body = jsBaseURLRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
+	body = jsBaseURLRelRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
+	// Rewrite baseURL: "http://localhost:8080/api" → baseURL: "/prefix/api"
+	body = jsBaseURLAbsRE.ReplaceAllString(body, "${1}${2}"+prefix+"${3}${4}")
 	return body
 }
 
