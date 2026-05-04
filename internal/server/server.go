@@ -99,6 +99,20 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		host = h
 	}
 
+	// CORS preflight: handle OPTIONS requests directly without forwarding.
+	// When the frontend uses axios with Content-Type: application/json or
+	// Authorization headers, the browser sends a CORS preflight even though
+	// the page and API are served through the same relay tunnel.
+	if r.Method == "OPTIONS" && r.Header.Get("Access-Control-Request-Method") != "" {
+		w.Header().Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", r.Header.Get("Access-Control-Request-Headers"))
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	client, target, pathPrefix := s.Hub.MatchRoute(host, r.URL.Path)
 
 	// WebSocket upgrade detection (Vite HMR, etc.)
@@ -193,6 +207,10 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		for k, v := range resp.Headers {
 			w.Header().Set(k, v)
+		}
+		// Add CORS header so cross-origin browser requests work through the tunnel.
+		if w.Header().Get("Access-Control-Allow-Origin") == "" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
 		}
 		w.WriteHeader(resp.Status)
 		w.Write([]byte(body))
