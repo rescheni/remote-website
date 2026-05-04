@@ -352,6 +352,14 @@ var jsBaseURLRelRE = regexp.MustCompile(
 var jsBaseURLAbsRE = regexp.MustCompile(
 	`(baseURL\s*:\s*|BASE_URL\s*[:=]\s*)(["'])https?://[^/]+(/[^"'\s]*)(["'])`)
 
+// Rewrites any absolute localhost URL in quoted strings to the relay prefix.
+// Catches patterns like "http://localhost:8080/api/..." regardless of which
+// variable holds them (baseURL, VITE_API_URL, inline fetch, etc.).
+//
+//	"http://localhost:8080/api/v1"  →  "/prefix/api/v1"
+var jsLocalhostURLRE = regexp.MustCompile(
+	`(["'])\s*https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(/[^"'\s]*)`)
+
 func shouldRewrite(headers map[string]string) bool {
 	ct := headers["Content-Type"]
 	if ct == "" {
@@ -391,6 +399,9 @@ func rewriteResponseBody(body, prefix string) string {
 	body = jsBaseURLRelRE.ReplaceAllString(body, "${1}${2}"+prefix+"/${3}${4}")
 	// Rewrite baseURL: "http://localhost:8080/api" → baseURL: "/prefix/api"
 	body = jsBaseURLAbsRE.ReplaceAllString(body, "${1}${2}"+prefix+"${3}${4}")
+	// Rewrite any quoted localhost URL: "http://localhost:8080/api/path" → "/prefix/api/path"
+	// Two groups: $1=quote, $2=path. Catches patterns regardless of variable name.
+	body = jsLocalhostURLRE.ReplaceAllString(body, "${1}"+prefix+"${2}")
 	return body
 }
 
