@@ -222,9 +222,19 @@ func (s *Server) handleWSProxy(w http.ResponseWriter, r *http.Request, client *C
 		}
 	}
 
+	// Extract subprotocols from the browser (e.g. vite-hmr).
+	var subprotocols []string
+	if sp := r.Header.Get("Sec-WebSocket-Protocol"); sp != "" {
+		subprotocols = strings.Split(sp, ",")
+		for i := range subprotocols {
+			subprotocols[i] = strings.TrimSpace(subprotocols[i])
+		}
+	}
+
 	// Accept the browser's WebSocket upgrade (writes 101 to browser)
 	wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
+		Subprotocols:       subprotocols,
 	})
 	if err != nil {
 		log.Printf("ws accept error: %v", err)
