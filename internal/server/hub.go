@@ -96,6 +96,7 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string, string) {
 	bestLen := -1
 	bestPrefix := ""
 
+	var allCandidates []string // debug
 	for _, c := range h.clients {
 		for _, r := range c.Routes {
 			routeHost := r.Host
@@ -105,6 +106,7 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string, string) {
 			if routeHost != host || (r.Type != "" && r.Type != "http") {
 				continue
 			}
+			allCandidates = append(allCandidates, r.PathPrefix+"->"+r.Target)
 			if r.PathPrefix != "" {
 				if len(path) >= len(r.PathPrefix) && path[:len(r.PathPrefix)] == r.PathPrefix {
 					if len(r.PathPrefix) > bestLen {
@@ -123,8 +125,10 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string, string) {
 		}
 	}
 	if len(matches) == 0 {
+		log.Printf("no route: host=%s path=%s candidates=%v", host, path, allCandidates)
 		return nil, "", ""
 	}
+	log.Printf("match: host=%s path=%s best=%q candidates=%v", host, path, bestPrefix, allCandidates)
 	m := matches[rand.Intn(len(matches))]
 	return m.client, m.target, bestPrefix
 }
