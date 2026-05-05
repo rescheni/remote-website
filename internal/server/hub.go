@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,8 +97,6 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string, string) {
 	bestLen := -1
 	bestPrefix := ""
 
-	var allCandidates []string // debug
-	var skipped []string
 	for _, c := range h.clients {
 		for _, r := range c.Routes {
 			routeHost := r.Host
@@ -105,10 +104,8 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string, string) {
 				routeHost = h
 			}
 			if routeHost != host || (r.Type != "" && r.Type != "http") {
-				skipped = append(skipped, r.PathPrefix+"->"+r.Target+" (host="+routeHost+" type="+r.Type+")")
 				continue
 			}
-			allCandidates = append(allCandidates, r.PathPrefix+"->"+r.Target)
 			if r.PathPrefix != "" {
 				if len(path) >= len(r.PathPrefix) && path[:len(r.PathPrefix)] == r.PathPrefix {
 					if len(r.PathPrefix) > bestLen {
@@ -127,14 +124,8 @@ func (h *Hub) MatchRoute(host, path string) (*ClientConn, string, string) {
 		}
 	}
 	if len(matches) == 0 {
-		if len(skipped) > 0 {
-			log.Printf("no route: host=%s path=%s candidates=%v skipped=%v", host, path, allCandidates, skipped)
-		} else {
-			log.Printf("no route: host=%s path=%s candidates=%v", host, path, allCandidates)
-		}
 		return nil, "", ""
 	}
-	log.Printf("match: host=%s path=%s best=%q candidates=%v", host, path, bestPrefix, allCandidates)
 	m := matches[rand.Intn(len(matches))]
 	return m.client, m.target, bestPrefix
 }
@@ -217,6 +208,9 @@ func (h *Hub) AddRoute(clientID string, route proto.Route) bool {
 			}
 		}
 	}
+	route.Host = strings.TrimSpace(route.Host)
+	route.PathPrefix = strings.TrimSpace(route.PathPrefix)
+	route.Target = strings.TrimSpace(route.Target)
 	c.Routes = append(c.Routes, route)
 	return true
 }

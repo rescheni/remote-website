@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"relay-tunnel/internal/proto"
 )
@@ -67,6 +68,10 @@ func (s *Server) handleAddRoute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	// Trim whitespace from fields that users might fat-finger.
+	req.Route.Host = strings.TrimSpace(req.Route.Host)
+	req.Route.PathPrefix = strings.TrimSpace(req.Route.PathPrefix)
+	req.Route.Target = strings.TrimSpace(req.Route.Target)
 	if req.Route.Type == "" {
 		req.Route.Type = "http"
 	}
